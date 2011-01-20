@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
       android:versionCode="1"
-      android:versionName="1.0" package="kalsms.niryariv.itp">
+      android:versionName="1.0" package="tk.logistics.gateway">
     
     <uses-permission android:name="android.permission.RECEIVE_SMS" />     
     <uses-permission android:name="android.permission.SEND_SMS" />
@@ -25,6 +25,13 @@
 		</receiver>
  		
  		<receiver android:name=".SMSSender">
+		</receiver>
+		
+		<receiver android:name=".SMSStatusUpdate">
+			<intent-filter>
+				<action android:name="tk.logistics.gateway.SMS_SENT" />
+				<action android:name="tk.logistics.gateway.SMS_DELIVERED" />
+			</intent-filter>
 		</receiver>
 
 		<activity android:name=".Prefs"

@@ -1,54 +1,117 @@
-package kalsms.niryariv.itp
+package tk.logistics.gateway;
 
 import java.util.ArrayList;
+
+import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.os.PowerManager;
+import android.database.Cursor;
+import android.net.Uri;
+import android.os.Bundle;
 import android.preference.PreferenceManager;
 import android.telephony.SmsManager;
+import android.telephony.SmsMessage;
 import android.util.Log;
 
-public class SMSSender extends BroadcastReceiver {
-
+public class SMSReceiver extends BroadcastReceiver {
+	
 	@Override
+	// source: http://www.devx.com/wireless/Article/39495/1954
 	public void onReceive(Context context, Intent intent) {
-		
-		// acquiring the wake clock to prevent device from sleeping while request is processed
-		final PowerManager pm = (PowerManager) context.getApplicationContext().getSystemService(Context.POWER_SERVICE);
-		PowerManager.WakeLock wake = pm.newWakeLock(PowerManager.SCREEN_DIM_WAKE_LOCK, "http_request");
-		wake.acquire();
+		if (!intent.getAction().equals("android.provider.Telephony.SMS_RECEIVED")) {
+			return;
+		}
 
 		// get settings
 		SharedPreferences settings = PreferenceManager.getDefaultSharedPreferences(context);
-		String targetUrl =  settings.getString("pref_target_url", "");
-		Log.d("KALSMS", "url:\"" + targetUrl);	
 		TargetUrlRequest url = new TargetUrlRequest();
-		// send the message to the URL
-		String resp = url.openURL("","",targetUrl).toString();
-		
-		Log.d("KALSMS", "RESP:\"" + resp);
-		
-		// SMS back the response
-		if (resp.trim().length() > 0) {
-			ArrayList<ArrayList<String>> items = url.parseXML(resp);
+
+		String identifier = settings.getString("pref_identifier", "");
+		String targetUrl =  settings.getString("pref_target_url", "");
+
+		SmsMessage msgs[] = getMessagesFromIntent(intent);
+
+		for (int i = 0; i < msgs.length; i++) {
+			SmsMessage mesg = msgs[i];
+			String message = mesg.getDisplayMessageBody();
+			String sender = mesg.getDisplayOriginatingAddress();
 			
-			SmsManager smgr = SmsManager.getDefault();
-			
-			for (int j = 0; j < items.size(); j++) {
-				String sendTo = items.get(j).get(0);
-				String sendMsg = items.get(j).get(1);
+			if (message != null && message.length() > 0 
+					&& (message.toLowerCase().startsWith(identifier) || identifier.trim() == "")) {
+				Log.d("KALSMS", "MSG RCVD:\"" + message + "\" from: " + sender);
 				
-				try {
-					Log.d("KALSMS", "SEND MSG:\"" + sendMsg + "\" TO: " + sendTo);
-					smgr.sendTextMessage(sendTo, null, sendMsg, null, null);
-				} catch (Exception ex) {
-					Log.d("KALSMS", "SMS FAILED");
+				// send the message to the URL
+				String resp = url.openURL(sender, message, targetUrl).toString();
+				Log.d("KALSMS", "RESP:\"" + resp);
+				
+				// SMS back the response
+				if (resp.trim().length() > 0) {
+					ArrayList<ArrayList<String>> items = url.parseXML(resp);
+					
+					SmsManager smgr = SmsManager.getDefault();
+					for (int j = 0; j < items.size(); j++) {
+						String sendTo = items.get(j).get(0);
+						if (sendTo.toLowerCase() == "sender") sendTo = sender;
+						String sendMsg = items.get(j).get(1);
+						try {
+							Log.d("KALSMS", "SEND MSG:\"" + sendMsg + "\" TO: " + sendTo);
+							Intent sintent = new Intent(context, SMSStatusUpdate.class);
+							sintent.setAction("tk.logistics.gateway.SMS_SENT");
+					    	PendingIntent sentIntent = PendingIntent.getBroadcast(context,0,sintent, 0);
+					    	Intent dintent = new Intent(context, SMSStatusUpdate.class);
+					    	dintent.setAction("tk.logistics.gateway.SMS_DELIVERED");
+					    	PendingIntent deliveryIntent = PendingIntent.getBroadcast(context,0,dintent, 0);
+							smgr.sendTextMessage(sendTo, null, sendMsg, sentIntent, deliveryIntent);
+						} catch (Exception ex) {
+							Log.d("KALSMS", "SMS FAILED");
+						}
+					}
 				}
+				// delete SMS from inbox, to prevent it from filling up
+				DeleteSMSFromInbox(context, mesg);
 			}
 		}
-		wake.release();
+	}
+
+	private void DeleteSMSFromInbox(Context context, SmsMessage mesg) {
+		Log.d("KALSMS", "try to delete SMS");
+		try {
+			Uri uriSms = Uri.parse("content://sms/inbox");
+			StringBuilder sb = new StringBuilder();
+			sb.append("address='" + mesg.getOriginatingAddress() + "' AND ");
+			sb.append("body='" + mesg.getMessageBody() + "'");
+			Cursor c = context.getContentResolver().query(uriSms, null, sb.toString(), null, null);
+			c.moveToFirst();
+			int thread_id = c.getInt(1);
+			context.getContentResolver().delete(Uri.parse("content://sms/conversations/" + thread_id), null, null);
+			c.close();
+		} catch (Exception ex) {
+			// deletions don't work most of the time since the timing of the
+			// receipt and saving to the inbox
+			// makes it difficult to match up perfectly. the SMS might not be in
+			// the inbox yet when this receiver triggers!
+			Log.d("SmsReceiver", "Error deleting sms from inbox: " + ex.getMessage());
+		}
+	}
+
+	
+	// from http://github.com/dimagi/rapidandroid 
+	// source: http://www.devx.com/wireless/Article/39495/1954
+	private SmsMessage[] getMessagesFromIntent(Intent intent) {
+		SmsMessage retMsgs[] = null;
+		Bundle bdl = intent.getExtras();
+		try {
+			Object pdus[] = (Object[]) bdl.get("pdus");
+			retMsgs = new SmsMessage[pdus.length];
+			for (int n = 0; n < pdus.length; n++) {
+				byte[] byteData = (byte[]) pdus[n];
+				retMsgs[n] = SmsMessage.createFromPdu(byteData);
+			}
+		} catch (Exception e) {
+			Log.e("KALSMS", "GetMessages ERROR\n" + e);
+		}
+		return retMsgs;
 	}
 }
-

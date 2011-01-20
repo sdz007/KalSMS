@@ -1,4 +1,4 @@
-package kalsms.niryariv.itp
+package tk.logistics.gateway;
 
 import java.io.StringReader;
 import java.util.ArrayList;
@@ -101,6 +101,5 @@ public class TargetUrlRequest {
             e.printStackTrace();
             return (output);
         }
-    }	
+    }
 }
-
